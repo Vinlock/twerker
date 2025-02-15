@@ -3,7 +3,7 @@
 <div align="center">
   <img src="https://github.com/user-attachments/assets/2aabec8f-d253-4a23-814c-c24f49a082ef" alt="Stick figures twerking">
 
-  Image inspired by [trashh_dev's](https://x.com/trashh_dev) stream starting screen.
+  <sub>Image inspired by [trashh_dev's](https://x.com/trashh_dev) stream starting screen.</sub>
 </div>
 
 A powerful and type-safe TypeScript worker thread pool implementation for Node.js with zero dependencies.
