@@ -1,7 +1,7 @@
 # Twerker
 
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/2aabec8f-d253-4a23-814c-c24f49a082ef" alt="Stick figures twerking">
+  <img src="https://github.com/user-attachments/assets/71c59a45-a20f-4562-a271-72190df50995" alt="Stick figures twerking">
 
   <sub>Image inspired by [trashh_dev's](https://x.com/trashh_dev) stream starting screen.</sub>
 </div>
