@@ -2,19 +2,16 @@
   "name": "twerker",
   "version": "1.0.0",
   "description": "A TypeScript worker thread pool implementation",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "type": "module",
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsc --declaration --declarationMap",
-    "prepublishOnly": "npm run build",
-    "format": "biome format --write .",
-    "lint": "biome lint .",
-    "check": "biome check --apply-unsafe .",
-    "ci": "biome ci .",
+    "build": "tsc",
+    "clean": "rm -rf dist",
     "test": "vitest --config vitest.config.ts",
     "test:watch": "vitest --config vitest.config.ts --watch",
     "test:coverage": "vitest run --coverage --config vitest.config.ts"
@@ -35,5 +32,8 @@
   },
   "engines": {
     "node": ">=16.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

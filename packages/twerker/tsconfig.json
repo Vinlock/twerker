@@ -8,13 +8,12 @@
     "strict": true,
     "skipLibCheck": true,
     "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "composite": true,
     "outDir": "./dist",
     "rootDir": "./src",
-    "types": ["vitest/globals", "node"],
-    "sourceMap": true,
-    "preserveSymlinks": true,
-    "composite": true,
-    "declarationMap": true
+    "types": ["vitest/globals", "node"]
   },
   "include": [
     "src/**/*"
