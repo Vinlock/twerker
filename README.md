@@ -125,42 +125,9 @@ const pool = createPool(4); // Creates a pool with 4 workers
 4. Handle errors appropriately for each task
 5. Consider the overhead of data serialization when passing arguments
 
-## Requirements
+## Contribution Guidelines
 
-- Node.js >= 16.0.0
-- TypeScript >= 5.3.3 (for development)
-
-## Development
-
-```bash
-# Install dependencies
-npm install
-
-# Build the project
-npm run build
-
-# Run tests
-npm test
-
-# Run tests with coverage
-npm run test:coverage
-
-# Format code
-npm run format
-
-# Lint code
-npm run lint
-```
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+Coming soon...
 
 ## License
 
