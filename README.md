@@ -32,9 +32,9 @@ pnpm add twerker
 
 ## Quick Start
 
-Create two separate files: one for defining your worker and another for using it.
+Create two separate files: one for defining your worker and another for using it. Name your worker file using kebab-case to match the function it implements.
 
-### `worker.ts` - Define your worker
+### `heavy-computation.worker.ts` - Define your worker
 ```typescript
 import run from 'twerker';
 
@@ -48,21 +48,21 @@ const heavyComputation = (a: number, b: number): number => {
   return result;
 };
 
-// Export the runner for use in other files
-export const { createPool, run: runSingle } = run(heavyComputation);
+// Export the runner directly
+export default run(heavyComputation);
 ```
 
 ### `main.ts` - Use the worker
 ```typescript
-import { createPool, runSingle } from './worker';
+import worker from './heavy-computation.worker';
 
 async function main() {
   // Method 1: Run a single task
-  const result = await runSingle(10, 20);
+  const result = await worker.run(10, 20);
   console.log('Single task result:', result);
 
   // Method 2: Create a pool for multiple tasks
-  const pool = createPool(); // Uses number of CPU cores by default
+  const pool = worker.createPool(); // Uses number of CPU cores by default
   const tasks = [
     pool.queue(10, 20),
     pool.queue(30, 40),
