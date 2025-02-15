@@ -44,6 +44,7 @@ jobs:
         id: package-version
         run: |
           # Update package.json with provided version
+          cd packages/twerker
           npm version ${{ github.event.inputs.version }} --no-git-tag-version
           
           # Commit the version bump
@@ -67,7 +68,7 @@ jobs:
         id: release-notes
         run: |
           COMMITS="${{ steps.commit-log.outputs.commits }}"
-          PROMPT="Generate a concise changelog for version ${{ github.event.inputs.version }} based on these git commits:\n\n$COMMITS\n\nFormat it as a markdown list, focusing on user-facing changes. Keep it brief but informative."
+          PROMPT="Generate a comprehensive changelog for version ${{ github.event.inputs.version }} based on these git commits:\n\n$COMMITS\n\nFormat the output in markdown with these sections:\n\n## 🚀 Features\n- New features and improvements\n\n## 🐛 Bug Fixes\n- Bug fixes and patches\n\n## 🏗️ Build & Dependencies\n- Build system and dependency changes\n\n## 📚 Documentation\n- Documentation updates\n\nOnly include sections that have relevant changes. Make it user-friendly and informative."
           
           RESPONSE=$(curl https://api.openai.com/v1/chat/completions \
             -H "Content-Type: application/json" \
@@ -81,12 +82,21 @@ jobs:
                 }
               ],
               "temperature": 0.7,
-              "max_tokens": 500
+              "max_tokens": 1000
             }')
           
           NOTES=$(echo $RESPONSE | jq -r '.choices[0].message.content')
+          
+          # Add a header with links
+          HEADER="# Twerker v${{ github.event.inputs.version }}\n\n"
+          HEADER+="[📦 NPM](https://www.npmjs.com/package/twerker) | "
+          HEADER+="[📚 Documentation](https://github.com/dakdevs/twerker#readme) | "
+          HEADER+="[💬 Discussions](https://github.com/dakdevs/twerker/discussions)\n\n"
+          
+          FULL_NOTES="$HEADER$NOTES"
+          
           echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "$FULL_NOTES" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
@@ -101,6 +111,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
       - name: Publish to NPM
-        run: pnpm publish --no-git-checks
+        run: cd packages/twerker && pnpm publish --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} 

@@ -1,0 +1,39 @@
+{
+  "name": "twerker",
+  "version": "1.0.0",
+  "description": "A TypeScript worker thread pool implementation",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "test:coverage": "vitest run --coverage"
+  },
+  "keywords": [
+    "worker",
+    "thread",
+    "pool",
+    "typescript",
+    "parallel"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "22.13.4",
+    "@vitest/coverage-v8": "1.2.2",
+    "vitest": "1.2.2"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
