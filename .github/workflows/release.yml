@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Create Release Pull Request or Publish to npm
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          title: "chore(release): version packages"
+          commit: "chore(release): version packages"
+          publish: pnpm run release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Generate Release Notes
+        if: steps.changesets.outputs.published == 'true'
+        id: release-notes
+        run: |
+          VERSION=$(node -p "require('./packages/twerker/package.json').version")
+          COMMITS=$(git log $(git describe --tags --abbrev=0)..HEAD --pretty=format:"%h %s")
+          
+          PROMPT="Generate a comprehensive changelog for version ${VERSION} based on these git commits:\n\n$COMMITS\n\nFormat the output in markdown with these sections:\n\n## 🚀 Features\n- New features and improvements\n\n## 🐛 Bug Fixes\n- Bug fixes and patches\n\n## 🏗️ Build & Dependencies\n- Build system and dependency changes\n\n## 📚 Documentation\n- Documentation updates\n\nOnly include sections that have relevant changes. Make it user-friendly and informative."
+          
+          RESPONSE=$(curl https://api.openai.com/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.OPENAI_API_KEY }}" \
+            -d '{
+              "model": "gpt-4",
+              "messages": [
+                {
+                  "role": "user",
+                  "content": "'"$PROMPT"'"
+                }
+              ],
+              "temperature": 0.7,
+              "max_tokens": 1000
+            }')
+          
+          NOTES=$(echo $RESPONSE | jq -r '.choices[0].message.content')
+          
+          # Add a header with links
+          HEADER="# Twerker v${VERSION}\n\n"
+          HEADER+="[📦 NPM](https://www.npmjs.com/package/twerker) | "
+          HEADER+="[📚 Documentation](https://github.com/dakdevs/twerker#readme) | "
+          HEADER+="[💬 Discussions](https://github.com/dakdevs/twerker/discussions)\n\n"
+          
+          FULL_NOTES="$HEADER$NOTES"
+          
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$FULL_NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        if: steps.changesets.outputs.published == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.release-notes.outputs.version }}
+          name: Release v${{ steps.release-notes.outputs.version }}
+          body: ${{ steps.release-notes.outputs.notes }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
