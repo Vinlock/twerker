@@ -161,9 +161,9 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Author
+## Core Maintainer
 
-Dak Washbrook
+Dak Washbrook ([@dakdevs on X](https://x.com/dakdevs))
 
 ---
 
