@@ -1,5 +1,11 @@
 # Twerker
 
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/71c59a45-a20f-4562-a271-72190df50995" alt="Stick figures twerking">
+
+  <sub>Image inspired by [trashh_dev's](https://x.com/trashh_dev) stream starting screen.</sub>
+</div>
+
 A powerful and type-safe TypeScript worker thread pool implementation for Node.js with zero dependencies.
 
 [![npm version](https://badge.fury.io/js/twerker.svg)](https://badge.fury.io/js/twerker)
