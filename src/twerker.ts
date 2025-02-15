@@ -1,4 +1,3 @@
-// twerker.ts
 import type { WorkerOptions } from 'node:worker_threads'
 import {
 	Worker,
@@ -49,6 +48,11 @@ type PoolState<TArgs extends readonly unknown[], TReturn> = {
 type WorkerFunction<TArgs extends readonly unknown[], TReturn> =
 	(...args: TArgs) => TReturn | Promise<TReturn>
 
+type PoolOptions = {
+	readonly numCPUs?: number
+	readonly handleError?: (error: Error) => void | Promise<void>
+}
+
 type QueueResult<TReturn> = {
 	readonly then: <TResult1 = TReturn, TResult2 = never>(
 		onfulfilled?: ((value: TReturn) => TResult1 | PromiseLike<TResult1>) | null,
@@ -58,7 +62,7 @@ type QueueResult<TReturn> = {
 		onrejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | null
 	) => Promise<TReturn | TResult>
 	readonly finally: (onfinally?: (() => void) | null) => Promise<TReturn>
-	readonly handleError: (handler: (error: unknown) => void) => Promise<TReturn | undefined>
+	readonly handleError: (handler: (error: Error) => void | Promise<void>) => Promise<TReturn | undefined>
 }
 
 type WorkerPool<TArgs extends readonly unknown[], TReturn> = {
@@ -72,7 +76,7 @@ type WorkerConfig = {
 }
 
 type RunResult<TArgs extends readonly unknown[], TReturn> = {
-	readonly createPool: (numWorkers?: number) => WorkerPool<TArgs, TReturn>
+	readonly createPool: (options?: PoolOptions) => WorkerPool<TArgs, TReturn>
 	readonly run: (...args: TArgs) => Promise<TReturn>
 }
 
@@ -140,8 +144,10 @@ const createWorker = () => {
 // Worker pool
 const createWorkerPool = <TArgs extends readonly unknown[], TReturn>(
 	fn: WorkerFunction<TArgs, TReturn>,
-	numWorkers: number,
+	options: PoolOptions = {},
 ): WorkerPool<TArgs, TReturn> => {
+	const numWorkers = options.numCPUs ?? cpus().length
+	const globalErrorHandler = options.handleError
 	let state: PoolState<TArgs, TReturn> | null = null
 	let isTerminating = false
 	let terminateResolve: (() => void) | null = null
@@ -191,6 +197,13 @@ const createWorkerPool = <TArgs extends readonly unknown[], TReturn>(
 		availableWorker.postMessage(newState.taskQueue[0].args)
 	}
 
+	const handleWorkerError = async (error: Error, task: Task<TArgs, TReturn>) => {
+		if (globalErrorHandler) {
+			await Promise.resolve(globalErrorHandler(error))
+		}
+		task.reject(error)
+	}
+
 	const setupWorker = (
 		worker: Worker,
 		onMessage: (msg: WorkerMessage<TReturn>) => void,
@@ -216,7 +229,6 @@ const createWorkerPool = <TArgs extends readonly unknown[], TReturn>(
 
 					if (isConsoleMessage(msg)) {
 						console[msg.method](...msg.args)
-
 						return
 					}
 
@@ -241,7 +253,7 @@ const createWorkerPool = <TArgs extends readonly unknown[], TReturn>(
 					state = updatedState
 
 					if (isWorkerErrorMessage(msg)) {
-						task.reject(new Error(msg.error))
+						handleWorkerError(new Error(msg.error), task)
 					} else if (isWorkerSuccessMessage<TReturn>(msg)) {
 						task.resolve(msg.result)
 					}
@@ -249,35 +261,17 @@ const createWorkerPool = <TArgs extends readonly unknown[], TReturn>(
 					processNextTask(updatedState)
 					checkAndTerminate(updatedState)
 				},
-				(error: Error) => {
+				(error) => {
 					if (!state || state.taskQueue.length === 0) {
 						return
 					}
-
 					const task = state.taskQueue[0]
-
-					const updatedState: PoolState<TArgs, TReturn> = {
-						workers: state.workers,
-						busyWorkers: new Set([
-							...state.busyWorkers,
-						].filter((w) => {
-							return w !== worker
-						})),
-						taskQueue: state.taskQueue.slice(1),
-						completedTasks: state.completedTasks + 1,
-						totalTasks: state.totalTasks,
-					}
-
-					state = updatedState
-					task.reject(error)
-					processNextTask(updatedState)
-					checkAndTerminate(updatedState)
+					handleWorkerError(error, task)
 				},
 			)
 		}
 
 		state = newState
-
 		return newState
 	}
 
@@ -319,10 +313,13 @@ const createWorkerPool = <TArgs extends readonly unknown[], TReturn>(
 			})
 
 			return {
-				handleError: async (handler: (error: unknown) => void) => {
-					return promise.catch((error: unknown) => {
-						handler(error)
-
+				handleError: async (handler: (error: Error) => void | Promise<void>) => {
+					return promise.catch(async (error: unknown) => {
+						if (error instanceof Error) {
+							await Promise.resolve(handler(error))
+						} else {
+							await Promise.resolve(handler(new Error(String(error))))
+						}
 						return undefined
 					})
 				},
@@ -471,13 +468,13 @@ export default function run<TArgs extends readonly unknown[], TReturn>(
 ): RunResult<TArgs, TReturn> {
 	if (!isMainThread) {
 		setupWorkerThread(fn)
+		return null as any
 	}
 
 	return {
-		createPool(numWorkers = cpus().length) {
-			return createWorkerPool(fn, numWorkers)
+		createPool(options?: PoolOptions) {
+			return createWorkerPool(fn, options)
 		},
-
 		async run(...args: TArgs): Promise<TReturn> {
 			return runSingleWorker(fn, ...args)
 		},
