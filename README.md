@@ -34,7 +34,7 @@ pnpm add twerker
 
 Create two separate files: one for defining your worker and another for using it. Name your worker file using kebab-case to match the function it implements.
 
-### `heavy-computation.worker.ts` - Define your worker
+### `heavy-computation.ts` - Define your worker
 ```typescript
 import run from 'twerker';
 
@@ -54,7 +54,7 @@ export default run(heavyComputation);
 
 ### `main.ts` - Use the worker
 ```typescript
-import worker from './heavy-computation.worker';
+import worker from './heavy-computation';
 
 async function main() {
   // Method 1: Run a single task
