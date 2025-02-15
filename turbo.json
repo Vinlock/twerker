@@ -5,11 +5,12 @@
   ],
   "tasks": {
     "build": {
-      "outputs": [
-        "dist/**",
-        "packages/*/dist/**"
+      "dependsOn": [
+        "^build"
       ],
-      "dependsOn": [],
+      "outputs": [
+        "dist/**"
+      ],
       "cache": true
     },
     "test": {
@@ -17,6 +18,9 @@
         "build"
       ],
       "cache": true
+    },
+    "clean": {
+      "cache": false
     },
     "lint": {
       "outputs": []

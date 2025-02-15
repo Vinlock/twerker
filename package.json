@@ -9,11 +9,15 @@
     "format": "biome format --write .",
     "lint": "biome lint .",
     "check": "biome check --apply-unsafe .",
-    "ci": "biome ci ."
+    "ci": "biome ci .",
+    "clean": "turbo clean && rm -rf node_modules"
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
-    "turbo": "^1.12.5",
+    "turbo": "2.4.2",
     "typescript": "5.7.3"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   }
 }
