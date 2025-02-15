@@ -19,11 +19,22 @@ A powerful and type-safe TypeScript worker thread pool implementation for Node.j
 ## Installation
 
 ```bash
-npm install twerker
+pnpm add twerker
+```
+
+If you're starting a new project, you can initialize it with pnpm first:
+
+```bash
+pnpm init
+pnpm add -D typescript @types/node
+pnpm add twerker
 ```
 
 ## Quick Start
 
+Create two separate files: one for defining your worker and another for using it.
+
+### `worker.ts` - Define your worker
 ```typescript
 import run from 'twerker';
 
@@ -37,25 +48,36 @@ const heavyComputation = (a: number, b: number): number => {
   return result;
 };
 
-// Create a worker pool
-const { createPool, run: runSingle } = run(heavyComputation);
+// Export the runner for use in other files
+export const { createPool, run: runSingle } = run(heavyComputation);
+```
 
-// Method 1: Run a single task
-const result = await runSingle(10, 20);
+### `main.ts` - Use the worker
+```typescript
+import { createPool, runSingle } from './worker';
 
-// Method 2: Create a pool for multiple tasks
-const pool = createPool(); // Uses number of CPU cores by default
-const tasks = [
-  pool.queue(10, 20),
-  pool.queue(30, 40),
-  pool.queue(50, 60)
-];
+async function main() {
+  // Method 1: Run a single task
+  const result = await runSingle(10, 20);
+  console.log('Single task result:', result);
 
-// Wait for all tasks to complete
-const results = await Promise.all(tasks);
+  // Method 2: Create a pool for multiple tasks
+  const pool = createPool(); // Uses number of CPU cores by default
+  const tasks = [
+    pool.queue(10, 20),
+    pool.queue(30, 40),
+    pool.queue(50, 60)
+  ];
 
-// Terminate the pool when done
-await pool.terminateWhenDone();
+  // Wait for all tasks to complete
+  const results = await Promise.all(tasks);
+  console.log('Pool results:', results);
+
+  // Terminate the pool when done
+  await pool.terminateWhenDone();
+}
+
+main().catch(console.error);
 ```
 
 ## API Reference
