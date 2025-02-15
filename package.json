@@ -1,44 +1,19 @@
 {
-  "name": "twerker",
-  "version": "1.0.0",
-  "description": "A TypeScript worker thread pool implementation",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "type": "module",
-  "files": [
-    "dist"
-  ],
+  "name": "twerker-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@8.15.4",
   "scripts": {
-    "build": "node --loader ts-node/esm scripts/build.ts",
-    "prepublishOnly": "npm run build",
+    "build": "turbo build",
+    "test": "turbo test",
     "format": "biome format --write .",
     "lint": "biome lint .",
     "check": "biome check --apply-unsafe .",
-    "ci": "biome ci .",
-    "pretest": "npm run build",
-    "test": "vitest --config vitest.config.ts",
-    "test:watch": "npm run build && vitest --config vitest.config.ts --watch",
-    "test:coverage": "npm run build && vitest run --coverage --config vitest.config.ts"
+    "ci": "biome ci ."
   },
-  "keywords": [
-    "worker",
-    "thread",
-    "pool",
-    "typescript",
-    "parallel"
-  ],
-  "author": "",
-  "license": "MIT",
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
-    "@types/node": "22.13.4",
-    "@vitest/coverage-v8": "3.0.5",
-    "esbuild": "0.25.0",
-    "ts-node": "10.9.2",
-    "typescript": "5.7.3",
-    "vitest": "3.0.5"
-  },
-  "engines": {
-    "node": ">=16.0.0"
+    "turbo": "^1.12.5",
+    "typescript": "5.7.3"
   }
 }
