@@ -4,10 +4,16 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'package.json'
 
 jobs:
   publish:
+    # Check if commit message contains skip actions
+    if: ${{ !contains(github.event.head_commit.message, '[skip actions]') }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,10 +35,80 @@ jobs:
         
       - name: Build
         run: pnpm run build
-        
-      - name: Get version
+
+      - name: Git config
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Determine Version Bump
+        id: version-bump
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          COMMITS=$(git log $LAST_TAG..HEAD --pretty=format:"%s")
+          
+          # Initialize flags for different types of changes
+          BREAKING=false
+          FEATURE=false
+          FIX=false
+          
+          # Analyze commits
+          while IFS= read -r commit; do
+            if [[ "$commit" == *"BREAKING CHANGE"* ]] || [[ "$commit" == "feat!"* ]] || [[ "$commit" == "fix!"* ]]; then
+              BREAKING=true
+            elif [[ "$commit" == "feat"* ]]; then
+              FEATURE=true
+            elif [[ "$commit" == "fix"* ]]; then
+              FIX=true
+            fi
+          done <<< "$COMMITS"
+          
+          # Determine version bump type
+          if [ "$BREAKING" = true ]; then
+            echo "bump=major" >> $GITHUB_OUTPUT
+          elif [ "$FEATURE" = true ]; then
+            echo "bump=minor" >> $GITHUB_OUTPUT
+          elif [ "$FIX" = true ]; then
+            echo "bump=patch" >> $GITHUB_OUTPUT
+          else
+            echo "bump=patch" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Bump Version
         id: package-version
-        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+        run: |
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          IFS='.' read -r -a VERSION_PARTS <<< "$CURRENT_VERSION"
+          
+          MAJOR="${VERSION_PARTS[0]}"
+          MINOR="${VERSION_PARTS[1]}"
+          PATCH="${VERSION_PARTS[2]}"
+          
+          case "${{ steps.version-bump.outputs.bump }}" in
+            "major")
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            "minor")
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            "patch")
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+          
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          
+          # Update package.json
+          npm version $NEW_VERSION --no-git-tag-version
+          
+          # Commit the version bump
+          git add package.json
+          git commit -m "chore: bump version to $NEW_VERSION [skip actions]"
+          git push
 
       - name: Generate commit log
         id: commit-log
