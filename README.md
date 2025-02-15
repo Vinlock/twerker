@@ -1,5 +1,8 @@
 # Twerker
 
+![image](https://github.com/user-attachments/assets/4080da2f-d972-4f99-bef1-c81e8099e064)
+Image inspired by [trashh_dev's](https://x.com/trashh_dev) stream starting screen.
+
 A powerful and type-safe TypeScript worker thread pool implementation for Node.js with zero dependencies.
 
 [![npm version](https://badge.fury.io/js/twerker.svg)](https://badge.fury.io/js/twerker)
