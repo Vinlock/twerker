@@ -6,6 +6,12 @@ A powerful and type-safe TypeScript worker thread pool implementation for Node.j
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/node/v/twerker)](https://nodejs.org)
 
+## Why Twerker?
+
+I created Twerker out of necessity. While there are several worker thread libraries available, none of them provided the perfect combination of simplicity, type-safety, and bare-minimum functionality that I was looking for. Most existing solutions were either over-engineered or lacked proper TypeScript support.
+
+Twerker aims to do one thing and do it well: provide a straightforward, type-safe way to run CPU-intensive tasks in worker threads. No bells and whistles, no complex configurations - just a clean API that works out of the box.
+
 ## Features
 
 - 📦 Zero dependencies - uses only Node.js built-in modules
