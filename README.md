@@ -1,7 +1,10 @@
 # Twerker
 
-![image](https://github.com/user-attachments/assets/4080da2f-d972-4f99-bef1-c81e8099e064)
-Image inspired by [trashh_dev's](https://x.com/trashh_dev) stream starting screen.
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/2aabec8f-d253-4a23-814c-c24f49a082ef" alt="Stick figures twerking">
+
+  Image inspired by [trashh_dev's](https://x.com/trashh_dev) stream starting screen.
+</div>
 
 A powerful and type-safe TypeScript worker thread pool implementation for Node.js with zero dependencies.
 
