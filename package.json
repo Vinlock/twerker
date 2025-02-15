@@ -1,6 +1,6 @@
 {
   "name": "twerker",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A TypeScript worker thread pool implementation",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
