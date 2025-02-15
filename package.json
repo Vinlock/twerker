@@ -1,0 +1,44 @@
+{
+  "name": "twerker",
+  "version": "1.0.0",
+  "description": "A TypeScript worker thread pool implementation",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node --loader ts-node/esm scripts/build.ts",
+    "prepublishOnly": "npm run build",
+    "format": "biome format --write .",
+    "lint": "biome lint .",
+    "check": "biome check --apply-unsafe .",
+    "ci": "biome ci .",
+    "pretest": "npm run build",
+    "test": "vitest --config vitest.config.ts",
+    "test:watch": "npm run build && vitest --config vitest.config.ts --watch",
+    "test:coverage": "npm run build && vitest run --coverage --config vitest.config.ts"
+  },
+  "keywords": [
+    "worker",
+    "thread",
+    "pool",
+    "typescript",
+    "parallel"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@biomejs/biome": "1.5.3",
+    "@types/node": "^20.11.24",
+    "@vitest/coverage-v8": "^3.0.5",
+    "esbuild": "^0.20.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3",
+    "vitest": "^3.0.5"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
