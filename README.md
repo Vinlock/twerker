@@ -98,15 +98,15 @@ The worker pool instance provides:
 
 ### Error Handling
 
+> [!WARNING]
+> If you don't handle worker errors using `handleError()`, any error in the worker will crash your main thread.
+
 ```typescript
 const pool = createPool();
-const task = pool.queue(10, 20)
-  .catch(error => {
-    console.error('Task failed:', error);
-  })
-  .finally(() => {
-    console.log('Task completed or failed');
-  });
+const task = pool.queue(10, 20).handleError((error) => {
+  console.error('Worker failed:', error.message);
+  // Handle the error as needed
+});
 ```
 
 ## Configuration
