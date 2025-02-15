@@ -99,8 +99,18 @@ The worker pool instance provides:
 ### Error Handling
 
 > [!WARNING]
-> If you don't handle worker errors using `handleError()`, any error in the worker will crash your main thread.
+> For pool operations, if you don't handle worker errors using `handleError()`, any error in the worker will crash your main thread.
 
+For single tasks using `.run()`, you can use regular try-catch:
+```typescript
+try {
+  const result = await worker.run(10, 20);
+} catch (error) {
+  console.error('Worker failed:', error.message);
+}
+```
+
+For pool operations, you must use `handleError()`:
 ```typescript
 const pool = createPool();
 const task = pool.queue(10, 20).handleError((error) => {
@@ -127,7 +137,12 @@ const pool = createPool(4); // Creates a pool with 4 workers
 
 ## Contribution Guidelines
 
-Coming soon...
+Issues and discussions are welcome! However, please note that this project aims to maintain a focused scope:
+
+> [!NOTE]
+> The core mission of Twerker is to provide the simplest possible API for running code in worker threads with full type safety. Feature requests should align with this goal of simplifying the developer experience for common threading scenarios, rather than adding complexity for edge cases.
+
+Coming soon: Contribution setup and guidelines.
 
 ## License
 
