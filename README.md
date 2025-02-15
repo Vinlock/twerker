@@ -26,7 +26,6 @@ Twerker aims to do one thing and do it well: provide a straightforward, type-saf
 ## Installation
 
 ```bash
-pnpm add -D typescript @types/node
 pnpm add twerker
 ```
 
