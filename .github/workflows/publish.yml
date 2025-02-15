@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for proper changelog generation
       
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -27,6 +29,55 @@ jobs:
         
       - name: Build
         run: pnpm run build
+        
+      - name: Get version
+        id: package-version
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Generate commit log
+        id: commit-log
+        run: |
+          COMMITS=$(git log $(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD --pretty=format:"%h %s")
+          echo "commits<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMITS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Generate release notes with GPT-4
+        id: release-notes
+        run: |
+          COMMITS="${{ steps.commit-log.outputs.commits }}"
+          PROMPT="Generate a concise changelog for version ${{ steps.package-version.outputs.version }} based on these git commits:\n\n$COMMITS\n\nFormat it as a markdown list, focusing on user-facing changes. Keep it brief but informative."
+          
+          RESPONSE=$(curl https://api.openai.com/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.OPENAI_API_KEY }}" \
+            -d '{
+              "model": "gpt-4",
+              "messages": [
+                {
+                  "role": "user",
+                  "content": "'"$PROMPT"'"
+                }
+              ],
+              "temperature": 0.7,
+              "max_tokens": 500
+            }')
+          
+          NOTES=$(echo $RESPONSE | jq -r '.choices[0].message.content')
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.package-version.outputs.version }}
+          name: Release v${{ steps.package-version.outputs.version }}
+          body: ${{ steps.release-notes.outputs.notes }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
       - name: Publish to NPM
         run: pnpm publish --no-git-checks
