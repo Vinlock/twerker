@@ -227,6 +227,10 @@ export class WorkerPool<T extends AnyFunction> {
         require.main.paths.unshift(path.join(${JSON.stringify(process.cwd())}, 'node_modules'));
       }
       
+      // Define the worker function in the global context
+      const ${this.functionName} = ${serializedFunction};
+      global.${this.functionName} = ${this.functionName};
+      
       // Add custom worker code that defines functions and imports
       ${options.workerCode || ''}
     `;
