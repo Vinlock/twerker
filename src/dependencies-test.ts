@@ -4,6 +4,7 @@
  */
 import run from './twerker';
 import crypto from 'crypto';
+import { subtract } from './subtract';
 
 // Sibling function 1: Basic addition
 function add(a: number, b: number): number {
@@ -24,7 +25,7 @@ const generateId = () => {
 // Worker function that uses both sibling functions and an imported dependency
 async function processData(name: string, delayMs: number): Promise<string> {
   // Use the 'add' sibling function
-  const sum = add(delayMs, 500);
+  const sum = subtract(add(delayMs, 500), 2);
 
   // Use the 'generateId' sibling function which uses crypto
   const id = generateId();

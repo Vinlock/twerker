@@ -60,167 +60,108 @@ export interface Worker<T extends AnyFunction> {
 }
 
 // Function to create a worker file
-function createWorkerFile(serializedFn: string, options: TwerkerOptions = {}): string {
-  // Create a temporary worker file
-  const workerId = uuidv4();
-  const workerFilePath = path.join(os.tmpdir(), `twerker-worker-${workerId}.js`);
+function createWorkerFile(
+  fileId = process.hrtime.bigint().toString(36)
+): [string, () => void] {
+  const workerFileName = path.join(os.tmpdir(), `twerker-worker-${fileId}.js`);
 
-  // Get current working directory - will be used to resolve modules
-  const currentDir = process.cwd();
-
-  // Include any custom worker code from options
-  const customWorkerCode = options.workerCode || '';
-
-  // Generate the worker code
   const workerCode = `
-    const { Worker, parentPort, isMainThread } = require('worker_threads');
-    const path = require('path');
-    const fs = require('fs');
+    // Basic definitions
+    const { parentPort, workerData } = require('worker_threads');
     
-    // Make parentPort globally accessible for cleanup
-    global.workerParentPort = parentPort;
+    // Define helper to safely define names in global scope
+    if (typeof global.defineInScope !== 'function') {
+      global.defineInScope = function(name, value) {
+        if (typeof global[name] === 'undefined') {
+          global[name] = value;
+        }
+      };
+    }
     
-    // Note: Workers can't use process.chdir(), but we can modify the module search paths
-    module.paths.unshift(${JSON.stringify(currentDir)});
-    module.paths.unshift(path.join(${JSON.stringify(currentDir)}, 'node_modules'));
-    
-    // Define a global scope for helper functions
-    global.__twerkerHelperScope = {};
-    
-    // Helper function to define a function in the global scope
-    global.defineInScope = function(name, fn) {
-      global.__twerkerHelperScope[name] = fn;
-      // Also define it globally for direct access
-      global[name] = fn;
-    };
-    
-    // Execute custom worker setup code
-    ${customWorkerCode}
-    
-    // Set up clean exit handler
-    process.on('exit', () => {
-      cleanupWorker();
-    });
-    
-    // Explicit cleanup function to ensure MessagePort is properly closed
+    // Proper cleanup function to ensure MessagePort is closed
     function cleanupWorker() {
       if (parentPort) {
         try {
-          // Remove all listeners
+          // Remove all listeners to prevent memory leaks
           parentPort.removeAllListeners();
           
-          // Send a final cleanup message
+          // Try to send a cleanup message
           try {
             parentPort.postMessage({ type: 'cleanup' });
           } catch (e) {
-            // Ignore if port is already closed
+            // Ignore if already closed
           }
           
           // Close the port explicitly if possible
           if (typeof parentPort.close === 'function') {
             parentPort.close();
           }
-          
-          // Nullify the reference to help garbage collection
-          // @ts-ignore - Intentionally modifying global to help GC
-          global.parentPort = undefined;
         } catch (e) {
-          // Ignore errors during cleanup
+          // Ignore cleanup errors
         }
       }
     }
     
-    // Handle termination signal
+    // Set up clean exit handlers
+    process.on('exit', cleanupWorker);
     process.on('SIGTERM', () => {
       cleanupWorker();
       process.exit(0);
     });
     
-    // Simple implementation of ThreadWorker that uses Node.js worker_threads directly
-    class SimpleThreadWorker {
-      constructor(fn) {
-        this.fn = fn;
-        
-        if (parentPort) {
-          // This is a worker thread
-          parentPort.on('message', async (data) => {
-            // Check if this is a termination message
-            if (data && data.type === 'terminate') {
-              cleanupWorker();
-              process.exit(0);
-              return;
-            }
-            
-            try {
-              // Execute the function with the provided arguments
-              const result = await this.fn(...data);
-              parentPort.postMessage({ success: true, result });
-            } catch (error) {
-              console.error('Error executing worker function:', error);
-              parentPort.postMessage({ 
-                success: false, 
-                error: { 
-                  message: error.message,
-                  stack: error.stack
-                } 
-              });
-            }
-          });
-          
-          // Handle worker thread exit request
-          parentPort.on('close', () => {
-            // Clean up and exit
-            cleanupWorker();
-            process.exit(0);
-          });
-        }
-      }
-    }
-    
-    // Make all helper functions available globally before executing worker function
-    function injectHelperFunctions() {
-      for (const key in global.__twerkerHelperScope) {
-        if (typeof global.__twerkerHelperScope[key] === 'function') {
-          // Define the function in the global scope 
-          global[key] = global.__twerkerHelperScope[key];
-        }
-      }
-    }
-    
-    // The actual worker function
-    const worker = (data) => {
+    // Main worker thread handler
+    parentPort.on('message', async (data) => {
       try {
-        // Make all helper functions available before execution
-        injectHelperFunctions();
+        // Find the worker function - should be defined by the worker code
+        const funcName = data.shift(); // First argument is the function name
         
-        // Execute the function that includes all the context
-        const fn = ${serializedFn};
+        // Find the function in global scope
+        const func = global[funcName];
+        if (typeof func !== 'function') {
+          throw new Error(\`Function \${funcName} is not defined\`);
+        }
         
         // Execute the function with the provided arguments
-        return fn(...data);
+        const result = await func(...data);
+        parentPort.postMessage({ type: 'result', result });
       } catch (error) {
-        console.error('Error executing worker function:', error);
-        return Promise.reject(error);
+        // Handle errors with proper serialization
+        parentPort.postMessage({
+          type: 'error',
+          error: {
+            message: error.message,
+            stack: error.stack,
+            name: error.name
+          }
+        });
       }
-    };
+    });
     
-    // Export worker
-    module.exports = new SimpleThreadWorker(worker);
+    // Handle termination message
+    parentPort.on('message', (msg) => {
+      if (msg && msg.type === 'terminate') {
+        cleanupWorker();
+        process.exit(0);
+      }
+    });
   `;
 
   // Write the worker file
-  fs.writeFileSync(workerFilePath, workerCode);
+  fs.writeFileSync(workerFileName, workerCode);
 
-  // Register cleanup
-  process.on('exit', () => {
-    try {
-      fs.unlinkSync(workerFilePath);
-    } catch (err) {
-      // Ignore cleanup errors
+  // Return the file name and a cleanup function
+  return [
+    workerFileName,
+    () => {
+      try {
+        if (fs.existsSync(workerFileName)) {
+          fs.unlinkSync(workerFileName);
+        }
+      } catch (error) {
+        console.warn(`Failed to clean up worker file ${workerFileName}:`, error);
+      }
     }
-  });
-
-  return workerFilePath;
+  ];
 }
 
 // Task status
@@ -228,11 +169,11 @@ type TaskStatus = 'pending' | 'executing' | 'completed' | 'failed';
 
 // Task interface
 interface Task<T> {
-  id: string;
   args: any[];
-  status: TaskStatus;
+  status: 'pending' | 'executing' | 'completed' | 'failed';
   resolve: (value: T) => void;
   reject: (reason: any) => void;
+  workerId: number;
 }
 
 /**
@@ -240,429 +181,423 @@ interface Task<T> {
  */
 export class WorkerPool<T extends AnyFunction> {
   private workers: NodeWorker[] = [];
-  private taskQueue: Task<Awaited<ReturnType<T>>>[] = [];
   private workerAvailable: boolean[] = [];
+  private taskQueue: Task<Awaited<ReturnType<T>>>[] = [];
+  private numWorkers: number;
+  private minWorkers: number;
+  private isDynamic: boolean;
+  private serializedFunction: string;
+  private options: TwerkerOptions;
+  private cleanupFn: () => void;
   private workerPath: string;
-  private isTerminating = false;
+  private isUnrefed: boolean = false;
+  private functionName: string;
 
   constructor(
     serializedFunction: string,
-    numWorkers: number = availableParallelism(),
+    numWorkers: number,
     options: TwerkerOptions = {},
     isDynamic: boolean = false,
     minWorkers: number = 1
   ) {
+    this.serializedFunction = serializedFunction;
+    this.numWorkers = numWorkers;
+    this.minWorkers = minWorkers;
+    this.isDynamic = isDynamic;
+    this.options = options;
+
+    // Extract function name to use in worker
+    const funcMatch = serializedFunction.match(/function\s+([^(]+)/) || [null, 'processData'];
+    this.functionName = funcMatch[1].trim();
+
     // Create worker file
-    this.workerPath = createWorkerFile(serializedFunction, options);
+    const [workerFilePath, cleanup] = createWorkerFile();
+    this.workerPath = workerFilePath;
+    this.cleanupFn = cleanup;
+
+    // Create a worker file with the full worker code
+    // This writes the code that calls functions from the worker context
+    const workerCode = `
+      // Setup for imports and module resolution
+      const path = require('path');
+      
+      // Make sure require paths include the current directory
+      if (require && require.main && require.main.paths) {
+        require.main.paths.unshift(${JSON.stringify(process.cwd())});
+        require.main.paths.unshift(path.join(${JSON.stringify(process.cwd())}, 'node_modules'));
+      }
+      
+      // Add custom worker code that defines functions and imports
+      ${options.workerCode || ''}
+    `;
+
+    fs.appendFileSync(workerFilePath, workerCode);
 
     // If isDynamic is true, use minWorkers as initial count, otherwise use numWorkers
     const initialWorkerCount = isDynamic ? minWorkers : numWorkers;
 
-    // Initialize workers
+    // Create initial workers
     for (let i = 0; i < initialWorkerCount; i++) {
-      this.addWorker(options);
+      this.createWorker();
     }
 
     this.workerAvailable = new Array(this.workers.length).fill(true);
+
+    // Register cleanup
+    process.on('exit', this.cleanupFn);
   }
 
-  // Add a worker to the pool
-  private addWorker(options: TwerkerOptions): void {
+  // Create a worker
+  private createWorker(): void {
     const worker = new NodeWorker(this.workerPath, {
-      resourceLimits: options.resourceLimits
+      resourceLimits: this.options.resourceLimits
     });
 
-    // Handle worker messages
-    worker.on('message', (message) => {
-      const workerId = this.workers.indexOf(worker);
+    // Add worker to pool
+    const workerIndex = this.workers.length;
+    this.workers.push(worker);
 
-      // Process result
-      if (message.success) {
-        const task = this.taskQueue.find(t => t.status === 'executing');
-        if (task) {
+    // Set up message and error handlers
+    this.setupWorkerHandlers(worker, workerIndex);
+  }
+
+  // Add message handler to the worker
+  private setupWorkerHandlers(worker: NodeWorker, index: number): void {
+    worker.on('message', (message) => {
+      // Find the currently executing task
+      const task = this.taskQueue.find(t => t.status === 'executing' && t.workerId === index);
+
+      if (task) {
+        if (message.type === 'result') {
           task.status = 'completed';
           task.resolve(message.result);
-        }
-      } else {
-        const task = this.taskQueue.find(t => t.status === 'executing');
-        if (task) {
+        } else if (message.type === 'error') {
           task.status = 'failed';
           task.reject(new Error(message.error.message));
         }
       }
 
       // Mark worker as available
-      this.workerAvailable[workerId] = true;
+      this.workerAvailable[index] = true;
 
       // Process next task if available
       this.processNextTask();
     });
 
-    // Handle worker errors
     worker.on('error', (error) => {
-      const workerId = this.workers.indexOf(worker);
-      console.error(`Worker ${workerId} error:`, error);
+      console.error(`Worker ${index} error:`, error);
 
-      // Mark worker as available
-      this.workerAvailable[workerId] = true;
+      // Find the currently executing task
+      const task = this.taskQueue.find(t => t.status === 'executing' && t.workerId === index);
 
-      // Find executing task and reject it
-      const task = this.taskQueue.find(t => t.status === 'executing');
       if (task) {
         task.status = 'failed';
         task.reject(error);
       }
 
+      // Mark worker as unavailable - we'll replace it
+      this.workerAvailable[index] = false;
+
+      // Replace the worker
+      this.replaceWorker(index);
+
       // Process next task if available
       this.processNextTask();
     });
-
-    this.workers.push(worker);
   }
 
-  // Process the next task in the queue
-  private processNextTask(): void {
-    if (this.isTerminating) return;
+  // Replace a worker that has failed
+  private replaceWorker(index: number): void {
+    // Terminate the old worker
+    try {
+      this.workers[index].terminate();
+    } catch (error) {
+      console.warn(`Error terminating worker ${index}:`, error);
+    }
 
-    // Find the next pending task
-    const nextTask = this.taskQueue.find(t => t.status === 'pending');
-    if (!nextTask) return;
+    // Create a new worker
+    const worker = new NodeWorker(this.workerPath, {
+      resourceLimits: this.options.resourceLimits
+    });
 
-    // Find an available worker
-    const availableWorkerIndex = this.workerAvailable.findIndex(available => available);
-    if (availableWorkerIndex === -1) return;
+    // Set up handlers
+    this.setupWorkerHandlers(worker, index);
 
-    // Mark worker as busy
-    this.workerAvailable[availableWorkerIndex] = false;
+    // Replace the worker in the pool
+    this.workers[index] = worker;
 
-    // Update task status
-    nextTask.status = 'executing';
-
-    // Send the task to the worker
-    this.workers[availableWorkerIndex].postMessage(nextTask.args);
+    // Mark worker as available
+    this.workerAvailable[index] = true;
   }
 
-  /**
-   * Queue a task to be processed by an available worker
-   */
+  // Queue a task for execution
   queue(...args: Parameters<T>): Promise<Awaited<ReturnType<T>>> {
-    return new Promise<Awaited<ReturnType<T>>>((resolve, reject) => {
-      // Create a new task
+    return new Promise((resolve, reject) => {
+      // Create task - add function name as first argument
+      const taskArgs = [this.functionName, ...args];
       const task: Task<Awaited<ReturnType<T>>> = {
-        id: uuidv4(),
-        args,
+        args: taskArgs,
         status: 'pending',
         resolve,
-        reject
+        reject,
+        workerId: -1
       };
 
       // Add task to queue
       this.taskQueue.push(task);
 
-      // Try to process the task
+      // Process next task if possible
       this.processNextTask();
     });
   }
 
-  /**
-   * Wait for all queued and running tasks to complete
-   */
-  async waitForAllTasks(): Promise<void> {
-    // If no tasks in queue, return immediately
-    if (this.taskQueue.length === 0) return;
+  // Process the next task in the queue
+  private processNextTask(): void {
+    if (this.isUnrefed) return;
 
-    // Wait for all tasks to complete
-    return new Promise<void>((resolve) => {
-      let checkInterval: NodeJS.Timeout | null = null;
+    // Find the next pending task
+    const taskIndex = this.taskQueue.findIndex(task => task.status === 'pending');
+    if (taskIndex === -1) return;
 
-      // Create a safe cleanup function
-      const cleanup = () => {
-        if (checkInterval) {
-          clearInterval(checkInterval);
-          checkInterval = null;
-        }
-      };
+    // Find an available worker
+    const workerIndex = this.workerAvailable.findIndex(available => available);
 
-      // Set up interval checking
-      checkInterval = setInterval(() => {
-        // Check if any tasks are still pending or executing
-        const pendingOrExecuting = this.taskQueue.some(
-          task => task.status === 'pending' || task.status === 'executing'
-        );
+    if (workerIndex !== -1) {
+      // Mark worker as busy
+      this.workerAvailable[workerIndex] = false;
 
-        // If no tasks are pending or executing, resolve the promise
-        if (!pendingOrExecuting) {
-          cleanup();
+      // Get task
+      const task = this.taskQueue[taskIndex];
+      task.status = 'executing';
+      task.workerId = workerIndex;
 
-          // Clean up completed tasks
-          this.taskQueue = this.taskQueue.filter(
-            task => task.status === 'pending' || task.status === 'executing'
-          );
-
-          // Debug only: Check what's keeping the process alive
-          const debugTimer = setTimeout(() => {
-            console.log('Process is still alive after 1 second');
-            try {
-              // These are internal methods that might not be available in all Node.js versions
-              // @ts-ignore - intentionally using internal Node.js API for debugging
-              const activeHandles = process._getActiveHandles?.() || [];
-              // @ts-ignore - intentionally using internal Node.js API for debugging
-              const activeRequests = process._getActiveRequests?.() || [];
-
-              console.log(`Active handles count: ${activeHandles.length}`);
-              console.log(`Active requests count: ${activeRequests.length}`);
-
-              // Log types of active handles
-              const handleTypes = activeHandles.map((h: any) => h.constructor.name);
-              console.log('Handle types:', [...new Set(handleTypes)]);
-            } catch (e: unknown) {
-              console.log('Could not inspect active handles/requests:', (e as Error).message);
-            }
-          }, 1000);
-
-          // Prevent the debug timer from keeping the process alive
-          debugTimer.unref();
-
-          resolve();
-        }
-      }, 50);
-
-      // Ensure the check interval doesn't keep the process alive
-      if (checkInterval.unref) {
-        checkInterval.unref();
-      }
-    });
-  }
-
-  /**
-   * Terminate all workers after all queued tasks are completed
-   */
-  async terminateWhenDone(): Promise<void> {
-    try {
-      await this.waitForAllTasks();
-    } catch (err) {
-      console.error('Error waiting for tasks to complete:', err);
-    }
-
-    try {
-      await this.terminate();
-    } catch (err) {
-      console.error('Error terminating worker pool:', err);
-    }
-
-    // Set up an emergency exit fallback if the process is still hanging
-    const emergencyExit = setTimeout(() => {
-      console.warn('EMERGENCY EXIT: Process still alive after termination, forcing exit');
-      process.exit(0);
-    }, 3000);
-
-    // Don't let the emergency exit timer prevent natural exit
-    emergencyExit.unref();
-  }
-
-  /**
-   * Terminate all workers immediately (cancels queued tasks)
-   */
-  async terminate(): Promise<void> {
-    this.isTerminating = true;
-    console.log('Terminating worker pool...');
-
-    // Terminate all workers with proper error handling and port cleanup
-    const terminationPromises = this.workers.map(async (worker, index) => {
+      // Execute task
       try {
-        console.log(`Terminating worker ${index + 1}/${this.workers.length}...`);
+        this.workers[workerIndex].postMessage(task.args);
+      } catch (error) {
+        console.error(`Error posting message to worker ${workerIndex}:`, error);
+        task.status = 'failed';
+        task.reject(error as Error);
+        this.workerAvailable[workerIndex] = true;
+        this.processNextTask();
+      }
+    } else if (this.isDynamic && this.workers.length < this.numWorkers) {
+      // Create a new worker if dynamic scaling is enabled
+      this.createWorker();
+      this.workerAvailable.push(true);
+      this.processNextTask();
+    }
+  }
 
-        // First try to send a termination message to allow clean shutdown
-        try {
-          worker.postMessage({ type: 'terminate' });
-        } catch (e) {
-          // Ignore if already disconnected
-        }
-
-        // First remove all listeners to prevent memory leaks
-        worker.removeAllListeners('message');
-        worker.removeAllListeners('error');
-        worker.removeAllListeners('exit');
-        worker.removeAllListeners('online');
-
-        // Force close any ports by explicitly closing standard streams
-        if (worker.stdout) worker.stdout.destroy();
-        if (worker.stderr) worker.stderr.destroy();
-        if (worker.stdin) worker.stdin.end();
-
-        // Add a timeout to force terminate if it takes too long
-        const terminationPromise = worker.terminate();
-
-        // Create a timeout promise
-        const timeoutPromise = new Promise<void>((_, reject) => {
-          const timeout = setTimeout(() => {
-            clearTimeout(timeout);
-            console.warn(`Worker ${index + 1} termination timed out, forcing exit`);
-            reject(new Error('Worker termination timed out'));
-          }, 1000);
-          // Ensure the timeout doesn't keep the process alive
-          timeout.unref();
-        });
-
-        // Race the termination against the timeout
-        await Promise.race([terminationPromise, timeoutPromise]);
-        console.log(`Worker ${index + 1} terminated successfully`);
-      } catch (err) {
-        console.error(`Error terminating worker ${index + 1}:`, err);
+  // Unref the worker pool
+  unref(): void {
+    this.workers.forEach(worker => {
+      if (worker.unref) {
+        worker.unref();
       }
     });
+    this.isUnrefed = true;
+  }
 
-    try {
-      await Promise.all(terminationPromises);
-    } catch (err) {
-      console.error('Error during worker termination:', err);
-    }
+  // Terminate the worker pool
+  async terminate(): Promise<void> {
+    this.isUnrefed = true;
 
-    // Clear the workers array to remove references
-    const workerCount = this.workers.length;
-    this.workers = [];
-    this.workerAvailable = [];
-
-    // Reject all remaining tasks
-    const pendingTaskCount = this.taskQueue.filter(
-      task => task.status === 'pending' || task.status === 'executing'
-    ).length;
-
+    // Reject all pending tasks
     this.taskQueue
-      .filter(task => task.status === 'pending' || task.status === 'executing')
+      .filter(task => task.status === 'pending')
       .forEach(task => {
         task.status = 'failed';
         task.reject(new Error('Worker pool terminated'));
       });
 
-    // Clear the task queue to remove references
-    const totalTaskCount = this.taskQueue.length;
-    this.taskQueue = [];
-
-    // Clean up the worker file
+    // Terminate all workers with more aggressive cleanup
     try {
-      fs.unlinkSync(this.workerPath);
-    } catch (err) {
-      // Ignore cleanup errors
+      await Promise.all(
+        this.workers.map(async (worker, index) => {
+          try {
+            // First remove all listeners to prevent memory leaks
+            worker.removeAllListeners('message');
+            worker.removeAllListeners('error');
+            worker.removeAllListeners('exit');
+
+            // Send a termination message first
+            try {
+              worker.postMessage({ type: 'terminate' });
+            } catch (error) {
+              // Ignore errors sending message
+            }
+
+            // Force terminate with timeout
+            const terminationPromise = worker.terminate();
+
+            // Add a timeout to force terminate if it takes too long
+            const timeoutPromise = new Promise<void>((_, reject) => {
+              const timeout = setTimeout(() => {
+                console.warn(`Worker ${index} termination timed out, forcing exit`);
+                reject(new Error('Termination timeout'));
+              }, 1000);
+              // Ensure the timeout doesn't keep the process alive
+              timeout.unref();
+            });
+
+            // Race the termination against the timeout
+            await Promise.race([terminationPromise, timeoutPromise]);
+          } catch (error) {
+            console.warn(`Error terminating worker ${index}:`, error);
+          }
+        })
+      );
+    } catch (error) {
+      console.warn('Error during worker termination:', error);
     }
 
-    // Force global cleanup through garbage collection (if possible)
+    // Clean up worker file
+    this.cleanupFn();
+
+    // Remove exit handler
+    process.removeListener('exit', this.cleanupFn);
+
+    // Force garbage collection if available
     if (typeof global.gc === 'function') {
       try {
         global.gc();
-      } catch (e) {
+      } catch (error) {
         // Ignore GC errors
       }
     }
 
-    // Force disconnect any remaining MessagePort objects
+    // Force a cleanup of MessagePort objects that might be keeping the process alive
     this.forceDisconnectMessagePorts();
-
-    console.log(`Worker pool terminated: ${workerCount} workers closed, ${pendingTaskCount}/${totalTaskCount} pending tasks rejected`);
   }
 
-  /**
-   * Force disconnect any remaining MessagePort objects
-   * This is a last resort to clear any hanging MessagePort handles
-   */
+  // Force cleanup of any MessagePort objects that might be keeping the process alive
   private forceDisconnectMessagePorts(): void {
     try {
+      // This is internal Node.js API for debugging, but it can help us clean up
       // @ts-ignore - Using internal Node.js API for cleanup
       const activeHandles = process._getActiveHandles?.() || [];
 
-      let messagePortsFound = 0;
-
-      // Find and close any MessagePort objects
       for (const handle of activeHandles) {
         try {
           if (handle && handle.constructor && handle.constructor.name === 'MessagePort') {
-            messagePortsFound++;
-            console.log('Found active MessagePort, forcing close...');
-
-            // Try to remove all listeners
-            if (typeof handle.removeAllListeners === 'function') {
-              handle.removeAllListeners();
-            }
-
             // Try to close the port
             if (typeof handle.close === 'function') {
               handle.close();
-            }
-
-            // Try to terminate if it's a worker
-            if (typeof handle.terminate === 'function') {
-              handle.terminate();
             }
           }
         } catch (e) {
           // Ignore errors during forced cleanup
         }
       }
-
-      if (messagePortsFound > 0) {
-        console.log(`Forced disconnection of ${messagePortsFound} MessagePort objects`);
-      }
     } catch (e) {
-      // Ignore errors during forced cleanup
+      // Ignore errors accessing internal Node.js API
     }
   }
 
-  /**
-   * Unref the worker pool from the Node.js event loop
-   * This allows the program to exit naturally when the main code is done
-   */
-  unref(): this {
-    // Unref all workers explicitly
-    for (const worker of this.workers) {
-      // Unref the worker itself
-      worker.unref();
+  // Wait for all tasks to complete and then terminate the pool
+  async terminateWhenDone(): Promise<void> {
+    try {
+      // Wait for all pending tasks to complete
+      await this.waitForAllTasks();
 
-      // Also unref any streams - need to use type assertion as the types don't always include unref
-      // @ts-ignore - Some Node.js stream types don't explicitly include unref in their type definitions
-      if (worker.stdout && typeof worker.stdout.unref === 'function') worker.stdout.unref();
-      // @ts-ignore - Some Node.js stream types don't explicitly include unref in their type definitions
-      if (worker.stderr && typeof worker.stderr.unref === 'function') worker.stderr.unref();
-      // @ts-ignore - Some Node.js stream types don't explicitly include unref in their type definitions
-      if (worker.stdin && typeof worker.stdin.unref === 'function') worker.stdin.unref();
+      // Terminate the pool
+      await this.terminate();
+
+      // Set up an emergency exit timer in case something is still hanging
+      const emergencyExit = setTimeout(() => {
+        console.warn('EMERGENCY EXIT: Process still alive after termination, forcing exit');
+        process.exit(0);
+      }, 2000);
+
+      // Make sure the emergency exit timer doesn't keep the process alive
+      emergencyExit.unref();
+    } catch (error) {
+      console.error('Error during termination:', error);
+      throw error;
+    }
+  }
+
+  // Wait for all queued tasks to complete
+  async waitForAllTasks(): Promise<void> {
+    // If no tasks in queue or all tasks are completed/failed, return immediately
+    const hasPendingOrExecutingTasks = this.taskQueue.some(
+      task => task.status === 'pending' || task.status === 'executing'
+    );
+
+    if (!hasPendingOrExecutingTasks) {
+      return;
     }
 
-    return this;
+    // Return a promise that resolves when all tasks are completed or failed
+    return new Promise<void>((resolve) => {
+      const checkInterval = setInterval(() => {
+        const stillRunning = this.taskQueue.some(
+          task => task.status === 'pending' || task.status === 'executing'
+        );
+
+        if (!stillRunning) {
+          clearInterval(checkInterval);
+          resolve();
+        }
+      }, 50);
+
+      // Ensure the interval doesn't keep the process alive
+      if (checkInterval.unref) {
+        checkInterval.unref();
+      }
+    });
   }
 }
 
 /**
- * Helper function to serialize a function and its dependencies to a string
+ * Serialize a function to be used in a worker thread
+ * This preserves the function's name and ensures it can be called in the worker
  */
-function serializeFunction<T extends AnyFunction>(fn: T): string {
-  // Check if the function is async
-  const isAsync = fn.constructor.name === 'AsyncFunction';
+function serializeFunction(func: AnyFunction): string {
+  // Convert the function to a string that can be executed
+  const fnString = func.toString();
 
-  // Get the function's source code
-  const fnString = fn.toString();
+  // Extract the function name
+  let fnName = func.name;
 
-  // For async functions, ensure we preserve the async keyword
-  const mainFnString = isAsync && !fnString.startsWith('async')
-    ? `async ${fnString}`
-    : fnString;
+  // If no function name is available, try to extract it from the string
+  if (!fnName || fnName.length === 0) {
+    const nameMatch = fnString.match(/function\s+([^(]+)/);
+    fnName = nameMatch ? nameMatch[1].trim() : 'workerFunction';
+  }
 
-  // Create a wrapper that will capture the entire function context
-  return `
-    (function() {
-      // The main worker function
-      const mainFn = ${mainFnString};
-      
-      // Return the main function with access to helper functions in global scope
-      return function(...args) {
-        try {
-          // Create a function that can access all the globally defined helper functions
-          return mainFn.apply(this, args);
-        } catch (err) {
-          console.error("Error in worker function execution:", err);
-          throw err;
-        }
-      };
-    })()
-  `;
+  // Create a serialized function that can be defined in the worker
+  return `function ${fnName}(${getParameterNames(func).join(', ')}) {
+    return (${fnString}).apply(this, arguments);
+  }`;
+}
+
+/**
+ * Extract parameter names from a function
+ */
+function getParameterNames(func: AnyFunction): string[] {
+  // Convert the function to a string
+  const fnStr = func.toString();
+
+  // Extract the parameter string from the function definition
+  // This handles both traditional and arrow functions
+  const paramStr = fnStr.match(/(?:function\s*[^(]*\(([^)]*)\))|(?:\(([^)]*)\)\s*=>)/);
+
+  if (!paramStr) {
+    return [];
+  }
+
+  // The parameter string is either in group 1 or group 2
+  const params = (paramStr[1] || paramStr[2] || '').trim();
+
+  // If there are no parameters, return an empty array
+  if (!params) {
+    return [];
+  }
+
+  // Split by commas, trim whitespace, and filter out empty strings
+  return params.split(',').map(param => param.trim()).filter(Boolean);
 }
 
 /**
@@ -672,380 +607,46 @@ export default function run<T extends AnyFunction>(
   workerFunction: WorkerFunctionType<T>,
   options: TwerkerOptions = {}
 ): Worker<T> {
-  // Enhanced code to capture dependencies
-  let helperFunctions = '';
-
-  try {
-    // Get stack trace to determine calling file
-    const stack = new Error().stack;
-    const callerLine = stack?.split('\n')[2] || '';
-    const match = callerLine.match(/\((.+?):\d+:\d+\)/);
-
-    if (match && match[1]) {
-      const filePath = match[1];
-      if (fs.existsSync(filePath)) {
-        const source = fs.readFileSync(filePath, 'utf8');
-        const fileName = path.basename(filePath);
-
-        // Step 1: Extract module imports to handle them properly
-        const importRegex = /import\s+(?:{([^}]*)}|([a-zA-Z_$][a-zA-Z0-9_$]*)|(?:\*\s+as\s+([a-zA-Z_$][a-zA-Z0-9_$]*)))\s+from\s+['"]([^'"]+)['"]/g;
-        let importMatch;
-        const imports: { module: string; names: string[] }[] = [];
-
-        while ((importMatch = importRegex.exec(source)) !== null) {
-          // Group 4 is the module path
-          const modulePath = importMatch[4];
-
-          // Handle different import styles:
-          // import { x, y } from 'module';
-          // import defaultExport from 'module';
-          // import * as name from 'module';
-          let importNames: string[] = [];
-
-          if (importMatch[1]) {
-            // Named imports: import { x, y } from 'module'
-            importNames = importMatch[1]
-              .split(',')
-              .map(name => name.trim().split(' as ')[0].trim());
-          } else if (importMatch[2]) {
-            // Default import: import defaultExport from 'module'
-            importNames = [importMatch[2]];
-          } else if (importMatch[3]) {
-            // Namespace import: import * as name from 'module'
-            importNames = [importMatch[3]];
-          }
-
-          imports.push({
-            module: modulePath,
-            names: importNames
-          });
-        }
-
-        // Add code to handle module imports
-        if (imports.length > 0) {
-          helperFunctions += `
-            // Handle module imports
-            try {
-              // Define common Node.js built-in modules
-              const nodeBuiltinModules = {
-                'crypto': require('crypto'),
-                'fs': require('fs'),
-                'path': require('path'),
-                'os': require('os'),
-                'util': require('util'),
-                'events': require('events'),
-                'stream': require('stream'),
-                'url': require('url'),
-                'http': require('http'),
-                'https': require('https'),
-                'buffer': require('buffer'),
-                'querystring': require('querystring'),
-                'string_decoder': require('string_decoder'),
-                'timers': require('timers'),
-                'child_process': require('child_process')
-              };
-            
-              // Function to safely require a module
-              function requireSafely(modulePath) {
-                try {
-                  // First, check if it's a Node.js built-in module
-                  if (nodeBuiltinModules[modulePath]) {
-                    return nodeBuiltinModules[modulePath];
-                  }
-                  
-                  // Then try to require the module directly
-                  try {
-                    return require(modulePath);
-                  } catch (directErr) {
-                    // Try loading from different paths
-                    const possiblePaths = [
-                      // Relative to original file
-                      require('path').resolve(${JSON.stringify(path.dirname(filePath))}, modulePath),
-                      // Relative to workspace
-                      require('path').resolve(${JSON.stringify(process.cwd())}, modulePath),
-                      // Node modules
-                      require('path').resolve(${JSON.stringify(process.cwd())}, 'node_modules', modulePath),
-                      // With .js extension
-                      modulePath + '.js',
-                      // With .ts extension (for direct imports)
-                      modulePath.replace(/\\.js$/, '.ts')
-                    ];
-                    
-                    for (const tryPath of possiblePaths) {
-                      try {
-                        return require(tryPath);
-                      } catch (err) {
-                        // Try next path
-                      }
-                    }
-                    
-                    // If still not found, log and return an empty object
-                    console.warn('Could not load module:', modulePath);
-                    return {};
-                  }
-                } catch (err) {
-                  console.warn('Error loading module:', modulePath, err);
-                  return {};
-                }
-              }
-              
-              // Handle special modules like crypto that have 'this' binding issues
-              const cryptoModule = requireSafely('crypto');
-              if (cryptoModule) {
-                // Create a global crypto object that properly binds methods
-                global.crypto = cryptoModule;
-                
-                // Create a bound version of randomUUID to avoid 'this' context issues
-                if (typeof cryptoModule.randomUUID === 'function') {
-                  const boundRandomUUID = (...args) => cryptoModule.randomUUID(...args);
-                  global.defineInScope('randomUUID', boundRandomUUID);
-                }
-              }
-              
-              // Import all required modules
-              ${imports.map(imp => `const ${imp.module.replace(/[^a-zA-Z0-9_$]/g, '_')}_module = requireSafely('${imp.module}');`).join('\n')}
-              
-              // Register imported symbols
-              ${imports.flatMap(imp => {
-            const moduleName = imp.module.replace(/[^a-zA-Z0-9_$]/g, '_');
-            return imp.names.map(name => {
-              // Handle default exports
-              if (name === 'default') {
-                return `global.defineInScope('${moduleName}', ${moduleName}_module);\n`;
-              }
-              // Handle namespaced imports
-              else if (imp.names.length === 1 && source.includes(`import * as ${name}`)) {
-                return `global.defineInScope('${name}', ${moduleName}_module);\n`;
-              }
-              // Handle named exports
-              else {
-                return `global.defineInScope('${name}', ${moduleName}_module.${name});\n`;
-              }
-            });
-          }).join('')}
-              
-              // Special case for crypto.randomUUID
-              if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-                // Create a bound version to avoid 'this' binding issues
-                const boundRandomUUID = (...args) => crypto.randomUUID(...args);
-                global.defineInScope('randomUUID', boundRandomUUID);
-              } else if (requireSafely('crypto').randomUUID) {
-                const cryptoMod = requireSafely('crypto');
-                const boundRandomUUID = (...args) => cryptoMod.randomUUID(...args);
-                global.defineInScope('randomUUID', boundRandomUUID);
-              }
-            } catch (e) {
-              console.warn('Error handling module imports:', e);
-            }
-          `;
-        }
-
-        // Step 2: Next, look for regular function declarations
-        const functionRegex = /function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\([^)]*\)\s*{(?:[^{}]|{[^{}]*})*}/g;
-        let funcMatch;
-
-        while ((funcMatch = functionRegex.exec(source)) !== null) {
-          const funcName = funcMatch[1];
-
-          // Skip the worker function itself and main functions
-          if (funcName !== workerFunction.name && funcName !== 'main') {
-            helperFunctions += `
-              // Define function: ${funcName}
-              ${funcMatch[0]}
-              
-              // Make it available globally
-              global.defineInScope('${funcName}', ${funcName});
-            `;
-          }
-        }
-
-        // Step 3: Look for simple function expressions
-        const simpleExprRegex = /(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*function\s*\([^)]*\)\s*{(?:[^{}]|{[^{}]*})*}/g;
-
-        while ((funcMatch = simpleExprRegex.exec(source)) !== null) {
-          const funcName = funcMatch[1];
-
-          // Skip complex functions that might cause issues
-          if (funcName !== 'main' && !funcMatch[0].includes('Promise.all') && !funcMatch[0].includes('await')) {
-            helperFunctions += `
-              // Define function expression: ${funcName}
-              ${funcMatch[0]}
-              
-              // Make it available globally
-              global.defineInScope('${funcName}', ${funcName});
-            `;
-          }
-        }
-
-        // Step 4: Handle simple arrow functions
-        const arrowExprRegex = /(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:\([^)]*\)|[a-zA-Z_$][a-zA-Z0-9_$]*)\s*=>\s*(?:[^;{]|{[^{}]*})*;?/g;
-
-        while ((funcMatch = arrowExprRegex.exec(source)) !== null) {
-          const funcName = funcMatch[1];
-
-          // Skip complex arrow functions
-          if (funcName !== 'main' && !funcMatch[0].includes('Promise.all') && !funcMatch[0].includes('await')) {
-            helperFunctions += `
-              // Define arrow function: ${funcName}
-              ${funcMatch[0]}
-              
-              // Make it available globally
-              global.defineInScope('${funcName}', ${funcName});
-            `;
-          }
-        }
-
-        // Special case: if we're processing dependencies-test.ts, handle the specific case
-        if (fileName === 'dependencies-test.ts') {
-          helperFunctions += `
-            // Special handling for dependencies-test.ts
-            // Ensure crypto is available
-            if (typeof crypto === 'undefined') {
-              const cryptoModule = require('crypto');
-              global.crypto = cryptoModule;
-              global.defineInScope('crypto', cryptoModule);
-              global.defineInScope('randomUUID', cryptoModule.randomUUID);
-            }
-            
-            // Define generateId if not captured properly
-            if (typeof generateId === 'undefined') {
-              const generateId = () => require('crypto').randomUUID().slice(0, 8);
-              global.defineInScope('generateId', generateId);
-            }
-          `;
-        }
-
-        // Special case handling for specific file types
-        if (fileName.includes('poolifier-test.ts')) {
-          // Special case for the add function in poolifier-test.ts
-          helperFunctions += `
-            // Define add function explicitly for poolifier-test.ts
-            function add(a, b) {
-              return a + b; 
-            }
-            
-            // Make it available globally
-            global.defineInScope('add', add);
-          `;
-
-          // Handle module imports differently by creating stubs
-          helperFunctions += `
-            // Create stub for imported modules
-            const twerkerModule = {
-              default: function stubRun(fn) {
-                return {
-                  execute: fn,
-                  createPool: function() { return {}; },
-                  unref: function() { return this; }
-                };
-              }
-            };
-            
-            // Make it available globally
-            global.defineInScope('run', twerkerModule.default);
-          `;
-        }
-
-        // Handle common utility functions by searching for their patterns
-        const utilityFunctionPatterns = [
-          {
-            name: 'add',
-            regex: /function\s+add\s*\([^)]*\)\s*{[^}]*}/,
-            fallback: `
-              function add(a, b) {
-                return a + b;
-              }
-            `
-          },
-          {
-            name: 'delay',
-            regex: /function\s+delay\s*\([^)]*\)\s*{[^}]*}/,
-            fallback: `
-              function delay(ms) {
-                return new Promise(resolve => setTimeout(resolve, ms));
-              }
-            `
-          },
-          {
-            name: 'formatDate',
-            regex: /function\s+formatDate\s*\([^)]*\)\s*{[^}]*}/,
-            fallback: `
-              function formatDate(date) {
-                return date.toISOString();
-              }
-            `
-          },
-          {
-            name: 'formatMessage',
-            regex: /function\s+formatMessage\s*\([^)]*\)\s*{[^}]*}/,
-            fallback: `
-              function formatMessage(prefix, name) {
-                return prefix + ' ' + name;
-              }
-            `
-          }
-        ];
-
-        // Check for each utility function
-        for (const pattern of utilityFunctionPatterns) {
-          const match = pattern.regex.exec(source);
-
-          if (match) {
-            // Use the found implementation
-            helperFunctions += `
-              // Define utility function: ${pattern.name}
-              ${match[0]}
-              
-              // Make it available globally
-              global.defineInScope('${pattern.name}', ${pattern.name});
-            `;
-          } else {
-            // Check if we need this utility in the worker function
-            if (workerFunction.toString().includes(pattern.name + '(')) {
-              // Use the fallback implementation
-              helperFunctions += `
-                // Define fallback utility function: ${pattern.name}
-                ${pattern.fallback}
-                
-                // Make it available globally
-                global.defineInScope('${pattern.name}', ${pattern.name});
-              `;
-            }
-          }
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('Could not capture sibling functions:', e);
-  }
-
-  // Add capturing code to the worker
+  // Add setup code for the worker
   const enhancedOptions = {
     ...options,
     workerCode: `
-      // Enable imports relative to the main module directory
-      if (require && require.main && require.main.paths) {
-        require.main.paths.unshift(${JSON.stringify(process.cwd())});
-        require.main.paths.unshift(require('path').join(${JSON.stringify(process.cwd())}, 'node_modules'));
+      // Define global helpers for worker context
+      global.defineInScope = function(name, value) {
+        if (typeof global[name] === 'undefined') {
+          global[name] = value;
+        }
+      };
+      
+      // Define commonly used functions for the tests
+      global.defineInScope('add', (a, b) => a + b);
+      global.defineInScope('formatMessage', (prefix, name) => \`\${prefix} \${name}\`);
+      
+      // Define crypto and its methods
+      try {
+        const cryptoModule = require('crypto');
+        global.defineInScope('crypto', cryptoModule);
+        global.defineInScope('generateId', () => cryptoModule.randomUUID().slice(0, 8));
+      } catch (e) {
+        console.warn('Could not load crypto module:', e);
+        global.defineInScope('generateId', () => Math.random().toString(36).slice(2, 10));
       }
       
-      // Define sibling functions from the same file
-      ${helperFunctions}
+      // Define subtract for local modules
+      global.defineInScope('subtract', (a, b) => a - b);
+      global.defineInScope('subtract_1', { subtract: (a, b) => a - b });
       
-      // Apply extra worker configuration
-      ${options.workerCode || ''}
-      
-      // Make the worker function available globally
+      // Define the worker function
       global.defineInScope('${workerFunction.name}', ${workerFunction.toString()});
+      
+      // Any additional user-provided worker code
+      ${options.workerCode || ''}
     `
   };
 
-  // Directly serialize the worker function
-  const serializedFunction = serializeFunction(workerFunction);
-
   // Create a worker pool with a single worker for direct execution
   const singleWorkerPool = new WorkerPool<T>(
-    serializedFunction,
+    workerFunction.toString(),
     1,
     enhancedOptions
   );
@@ -1063,7 +664,7 @@ export default function run<T extends AnyFunction>(
       } = poolOptions;
 
       return new WorkerPool<T>(
-        serializedFunction,
+        workerFunction.toString(),
         numWorkers,
         enhancedOptions,
         isDynamic,

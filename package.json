@@ -1,7 +1,7 @@
 {
   "name": "twerker",
-  "version": "2.1.0",
-  "description": "TypeScript Worker Threads Made Simple - Run TS functions in worker threads with type safety",
+  "version": "2.2.0",
+  "description": "TypeScript library for effortless worker thread management with seamless dependency handling",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {

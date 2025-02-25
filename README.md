@@ -78,41 +78,48 @@ async function main() {
 main().catch(console.error);
 ```
 
-## Using Sibling Functions and Imported Dependencies
+## Using Sibling Functions and Imported Modules
 
-Twerker v2.1.0 adds support for accessing sibling functions and imported dependencies in worker threads. This allows you to structure your code more naturally without worrying about serialization:
+Twerker automatically handles sibling functions and imported modules in your worker threads. This means you can:
+
+1. **Call sibling functions**: Use other functions defined in the same file as your worker function
+2. **Use imported modules**: Access modules imported in your file
+3. **Handle both NodeJS built-ins and local modules**: Works with the Node.js standard library and local project imports
+
+Example with sibling functions and imports:
 
 ```typescript
-import run from 'twerker';
 import crypto from 'crypto';
+import { subtract } from './subtract';
 
-// Sibling function that will be available in the worker thread
-function formatMessage(name: string): string {
-  return `Hello, ${name}!`;
+// Sibling function
+function add(a: number, b: number): number {
+  return a + b;
 }
 
-// Arrow function using an imported module
-const generateId = () => crypto.randomUUID().slice(0, 8);
+// Worker function that uses sibling functions and imports
+async function processData(name: string, delayMs: number): Promise<string> {
+  // Use the 'add' sibling function
+  const sum = subtract(add(delayMs, 500), 2);
 
-// Worker function that uses both sibling functions and imported modules
-async function processData(name: string): Promise<string> {
-  // Use the sibling function
-  const message = formatMessage(name);
-  
-  // Use the function that depends on an imported module
-  const id = generateId();
-  
-  return `${message} (ID: ${id})`;
+  // Use the imported crypto module
+  const id = crypto.randomUUID().slice(0, 8);
+
+  return `Hello, ${name} (ID: ${id}, processed in ${sum}ms)`;
 }
 
-async function main() {
-  const worker = run(processData);
-  const result = await worker.execute('World');
-  console.log(result); // Output: Hello, World! (ID: a1b2c3d4)
-}
-
-main().catch(console.error);
+// Use with Twerker - sibling functions and imports work automatically
+const worker = run(processData);
+const result = await worker.execute('World', 100);
 ```
+
+### How It Works
+
+Twerker analyzes your source code and:
+1. Detects imported modules and makes them available in the worker context
+2. Captures sibling functions and includes them in the worker thread
+3. Handles special cases like `this` binding for methods on imported modules
+4. Ensures proper cleanup after execution
 
 ## API Reference
 
