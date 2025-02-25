@@ -3,8 +3,14 @@
  */
 import run from './twerker';
 
+function add(a: number, b: number): number {
+  return a + b;
+}
+
 // A simple worker function with a delay
 function delayedGreeting(name: string, delayMs: number): Promise<string> {
+  add(1, 2);
+
   return new Promise((resolve) => {
     setTimeout(() => {
       resolve(`Hello, ${name}!`);

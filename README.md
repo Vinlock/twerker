@@ -27,6 +27,7 @@ Twerker aims to do one thing and do it well: provide a straightforward, type-saf
 - 🧵 **Thread Pools**: Create worker pools for processing multiple tasks in parallel
 - 🔄 **Asynchronous**: Promise-based API for seamless integration
 - 🧩 **Preserves Context**: Your functions run with proper access to imports and dependencies
+- 🌐 **Full Dependency Support**: Access sibling functions and imported modules in your worker threads
 - 🏁 **Clean Exit**: Worker pools terminate properly when no longer needed
 
 ## Installation
@@ -77,6 +78,42 @@ async function main() {
 main().catch(console.error);
 ```
 
+## Using Sibling Functions and Imported Dependencies
+
+Twerker v2.1.0 adds support for accessing sibling functions and imported dependencies in worker threads. This allows you to structure your code more naturally without worrying about serialization:
+
+```typescript
+import run from 'twerker';
+import crypto from 'crypto';
+
+// Sibling function that will be available in the worker thread
+function formatMessage(name: string): string {
+  return `Hello, ${name}!`;
+}
+
+// Arrow function using an imported module
+const generateId = () => crypto.randomUUID().slice(0, 8);
+
+// Worker function that uses both sibling functions and imported modules
+async function processData(name: string): Promise<string> {
+  // Use the sibling function
+  const message = formatMessage(name);
+  
+  // Use the function that depends on an imported module
+  const id = generateId();
+  
+  return `${message} (ID: ${id})`;
+}
+
+async function main() {
+  const worker = run(processData);
+  const result = await worker.execute('World');
+  console.log(result); // Output: Hello, World! (ID: a1b2c3d4)
+}
+
+main().catch(console.error);
+```
+
 ## API Reference
 
 ### `run<T>(workerFunction: T, options?: TwerkerOptions): Worker<T>`
@@ -114,6 +151,15 @@ When working with worker threads, it's important to properly manage resources:
 1. Always call `terminateWhenDone()` when you're done with a worker pool
 2. Use `unref()` when you want the program to exit naturally even if workers are still running
 3. Set resource limits if needed using the `resourceLimits` option
+
+## Limitations
+
+While Twerker attempts to support sibling functions and module imports, there are some limitations:
+
+1. Complex dependencies may not be fully serialized
+2. Some modules with special requirements might need manual handling
+3. Functions that rely on closure variables might not work as expected
+4. Modules with 'this' binding issues (like some crypto methods) receive special handling
 
 ## License
 
