@@ -1,0 +1,42 @@
+# Source control
+.git
+.gitignore
+
+# Development files
+node_modules
+.vscode
+.idea
+.github
+.npmrc
+.editorconfig
+.eslintrc
+.prettierrc
+.DS_Store
+
+# Tests and examples
+**/__tests__
+**/*.test.ts
+**/*.spec.ts
+**/exit-test.ts
+**/poolifier-test.ts
+**/demo.ts
+**/performance-demo.ts
+**/simple-demo.ts
+**/example-*.ts
+**/examples
+
+# Build artifacts
+coverage
+.nyc_output
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock 
